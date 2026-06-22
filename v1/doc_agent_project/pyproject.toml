@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "doc-agent"
+version = "0.1.0"
+description = "Agentic documentation-QA system with calibrated confidence (code search, doc search, code execution)."
+authors = ["Hackathon Team <team@example.com>"]
+readme = "README.md"
+packages = [{ include = "doc_agent" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+# Core: data models + the Anthropic SDK for tool-use orchestration.
+pydantic = "^2.7"
+anthropic = "^0.40"
+numpy = "^1.26"
+
+# RAG is optional. Install with: `poetry install --extras rag`
+# Without these, the system automatically falls back to a brute-force numpy
+# index and a deterministic hashing embedder, so it still runs end-to-end.
+faiss-cpu = { version = "^1.8", optional = true }
+sentence-transformers = { version = "^2.7", optional = true }
+
+# Optional: notebook execution support for the run_notebook tool.
+jupyter = { version = "^1.0", optional = true }
+
+[tool.poetry.extras]
+rag = ["faiss-cpu", "sentence-transformers"]
+notebooks = ["jupyter"]
+all = ["faiss-cpu", "sentence-transformers", "jupyter"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
