@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "doc-qa-agent"
+version = "0.1.0"
+description = "Agentic documentation-QA system: searches code/docs, executes code, and returns calibrated-confidence answers using Azure GPT-OSS-120."
+authors = ["Hackathon Team <team@example.com>"]
+readme = "README.md"
+packages = [{ include = "doc_qa_agent" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+# --- Data models (imposed: pydantic everywhere, no dataclasses) ---
+pydantic = "^2.7"
+pydantic-settings = "^2.3"
+# --- LLM access (imposed: GPT-OSS-120 served via Azure / OpenAI-compatible) ---
+openai = "^1.40"
+# --- Retrieval / RAG ---
+faiss-cpu = "^1.8"
+numpy = "^1.26"
+tiktoken = "^0.7"
+# --- Imposed storage backend ---
+qdrant-client = "^1.9"
+# --- Notebook execution ---
+nbclient = "^0.10"
+nbformat = "^5.10"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2"
+ruff = "^0.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
