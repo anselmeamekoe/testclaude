@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "sparrow-doc-agent"
+version = "0.1.0"
+description = "Agentic documentation-QA system over source code, files and live code execution, with calibrated confidence."
+authors = ["Your Team <team@example.com>"]
+readme = "README.md"
+packages = [{ include = "sparrow_agent" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+# LLM + embeddings are served behind an OpenAI-compatible API
+# (gpt-oss-120b for chat, an OpenAI embedding model for vectors).
+openai = "^1.40"
+# Local vector store for in-process RAG over the cloned repo.
+faiss-cpu = "^1.8"
+numpy = "^1.26"
+# Data models (NO dataclasses anywhere in this project).
+pydantic = "^2.7"
+pydantic-settings = "^2.3"
+# Token-aware chunking + robust retries.
+tiktoken = "^0.7"
+tenacity = "^8.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2"
+ruff = "^0.5"
+
+[tool.poetry.scripts]
+# poetry run sparrow-agent --input payload.json
+sparrow-agent = "sparrow_agent.pipeline:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
