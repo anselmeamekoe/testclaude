@@ -36,13 +36,13 @@ Run:   python optuna_amount_weighted.py
 Needs: optuna, xgboost, scikit-learn, numpy  (+ fraud_decisioning.py alongside)
 """
 
-import pickle
+import joblib
 import warnings
 import numpy as np
 import optuna
 from optuna.samplers import TPESampler
 from optuna.pruners import MedianPruner
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold,StratifiedKFold
 from sklearn.metrics import roc_auc_score, average_precision_score
 from xgboost import XGBClassifier
 
@@ -84,10 +84,11 @@ def cv_score(params, X, y, amount, groups, n_splits=N_SPLITS,
         "auroc"      : plain AUROC             (prior-robust, count-based)
         "aucpr"      : average precision       (value-blind AND prior-sensitive)
     """
-    sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    #sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    sgkf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     fold_scores = []
-
-    for fold, (tr, va) in enumerate(sgkf.split(X, y, groups=groups)):
+    #for fold, (tr, va) in enumerate(sgkf.split(X, y, groups=groups)):
+    for fold, (tr, va) in enumerate(sgkf.split(X, y)):
         draw_scores = []
         for d in range(n_draws):
             rng = np.random.default_rng(seed + 1000 * fold + d)
@@ -266,9 +267,10 @@ def main():
     for metric in ("amount_auc", "aucpr"):
         print(f"\n=== Optuna (TPE) tuning on: {metric} ===")
         study = tune(Xtr, ytr, atr, gtr, metric=metric, n_trials=N_TRIALS)
-        # Save the sampler with pickle to be loaded later.
-        with open(f"fraud_xgb_{metric}_sampler.pkl", "wb") as fout:
-            pickle.dump(study.sampler, fout)
+        # Save the sampler with  to be loaded later.
+        #joblib.dump(study, f"fraud_xgb_{metric}_sampler.pkl")
+
+        joblib.dump(study, f"fraud_xgb_{metric}_sampler_no_groups_split.pkl")
 
         bt = study.best_trial
         done = len([t for t in study.trials if t.state.name == "COMPLETE"])
@@ -334,3 +336,4 @@ INTERPRETING THIS COMPARISON (read before quoting it):
 
 if __name__ == "__main__":
     main()
+
