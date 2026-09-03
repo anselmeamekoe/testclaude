@@ -11,12 +11,14 @@ random_curve   : score vs training-set SIZE (train on growing random subsets).
                  the train/validation gap is.
 
 temporal_curve : score vs LENGTH OF HISTORY, counted in whole calendar periods
-                 (months by default). The most recent period is held out as
-                 validation; the training window then grows backward one period
-                 at a time (last 1 month, last 2 months, ...). Under drift the
-                 curve peaks at a limited look-back and then declines — a sign
-                 that old data is stale. Accepts either a datetime column or
-                 ordered integer period ids (e.g. month numbers 1..T).
+                 (months by default). The training window grows backward one
+                 period at a time (last 1 month, last 2 months, ...) and each
+                 look-back is scored on the SAME explicit test set
+                 (ds.X_test/ds.y_test), exactly like random_curve. Under drift
+                 the curve peaks at a limited look-back and then declines — a
+                 sign that old data is stale. The training time column may be a
+                 datetime column or ordered integer period ids (month numbers
+                 1..T).
 
 stress_curve   : refit-free resilience to worst-case drift (delegates to
                  modeva_ext.resilience_stress_curve).
@@ -125,12 +127,18 @@ class LearningCurveAnalyzer:
     # B) TEMPORAL MODE — score vs length of history (in calendar periods)    #
     # ===================================================================== #
     def temporal_curve(self, model, ds: Dataset, *, freq: str = "M",
-                       val_periods: int = 1,
                        min_period_samples: int = 30) -> LearningCurveReport:
         """Grow the training window backward one calendar period at a time and
-        score each look-back on the most recent period.
+        score each look-back on the **explicit test set** `ds.X_test/ds.y_test`.
 
-        The time column (Dataset built with `time_col=...`) may be either:
+        Like `random_curve`, the evaluation target is fixed (the held-out test
+        set), so every point is comparable; only the training window changes —
+        here it is the most recent L periods of the training set rather than a
+        random subset. This matches the out-of-time framing: train = history,
+        test = the future period you want to predict. Build the Dataset so the
+        test set is that target (e.g. the most recent block).
+
+        The training time column (Dataset built with `time_col=...`) may be:
           * a datetime column, bucketed into calendar periods at `freq`
             ("M" month [default], "W" week, "Q" quarter, "Y" year); or
           * ordered integer period ids, e.g. month numbers 1..T — each distinct
@@ -139,80 +147,74 @@ class LearningCurveAnalyzer:
         Parameters
         ----------
         freq               : calendar period size (used only for datetime input).
-        val_periods        : most-recent periods held out as validation (>=1).
-        min_period_samples : skip a look-back whose window has fewer rows.
+        min_period_samples : skip a look-back whose training window has fewer rows.
 
         Returns a `LearningCurveReport` (mode "temporal") whose `table` has one
-        row per look-back: length in periods, the covered period range, sample
-        count, and validation score.
+        row per look-back: length in periods, the covered period range, training
+        sample count, and the test score.
         """
         if ds.time_train is None:
             raise ValueError(
-                "temporal_curve needs a time column: build the Dataset with "
-                "time_col=... (a datetime column or integer period ids 1..T).")
+                "temporal_curve needs a time column on the TRAINING data: build "
+                "the Dataset with time_col=... (a datetime column or integer "
+                "period ids 1..T).")
 
         pid, labels, unit = self._periods(ds.time_train, freq)
         P = len(labels)
-        if P < 3:
-            raise ValueError(f"Need at least 3 time periods; found {P} {unit}(s).")
-        val_periods = 1 if val_periods >= P - 1 else max(1, val_periods)
+        if P < 2:
+            raise ValueError(f"Need at least 2 training periods; found {P} {unit}(s).")
 
-        X = ds.X_train.to_numpy(float)
-        y = ds.y_train.to_numpy()
+        Xtr, ytr = ds.X_train.to_numpy(float), ds.y_train.to_numpy()
+        Xte, yte = ds.X_test.to_numpy(float), ds.y_test.to_numpy()   # fixed target
         name = headline_name(ds.task)
-
-        val_mask = pid >= (P - val_periods)          # most recent period(s)
-        Xval, yval = X[val_mask], y[val_mask]
-        pool_mask = ~val_mask
-        last_tp = P - val_periods - 1                # newest training period id
+        last_tp = P - 1                              # newest training period
 
         rows = []
-        for L in range(1, last_tp + 2):              # look-back length in periods
+        for L in range(1, P + 1):                    # look-back length in periods
             lo = last_tp - L + 1                      # oldest period included
-            m = pool_mask & (pid >= lo) & (pid <= last_tp)
+            m = pid >= lo                             # most recent L periods of train
             if m.sum() < min_period_samples:
                 continue
-            mdl = clone(model).fit(X[m], y[m])
+            mdl = clone(model).fit(Xtr[m], ytr[m])
             rows.append(dict(lookback=L,
                              from_period=labels[lo], to_period=labels[last_tp],
                              n_samples=int(m.sum()),
-                             val=round(float(score(yval, mdl, Xval, ds.task)), 4)))
+                             test=round(float(score(yte, mdl, Xte, ds.task)), 4)))
         curve = pd.DataFrame(rows)
         if curve.empty:
             raise ValueError("No look-back window met min_period_samples; lower it "
                              "or widen the period (e.g. freq='Q').")
 
-        best = curve.loc[curve["val"].idxmax()]
+        best = curve.loc[curve["test"].idxmax()]
 
-        # single figure: validation vs history length, best point starred
+        # single figure: test score vs history length, best point starred
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=curve["lookback"], y=curve["val"], mode="lines+markers",
-            name=f"validation {name}", line=dict(color=viz.ACCENT),
+            x=curve["lookback"], y=curve["test"], mode="lines+markers",
+            name=f"test {name}", line=dict(color=viz.ACCENT),
             customdata=np.stack([curve["from_period"], curve["to_period"],
                                  curve["n_samples"]], axis=-1),
             hovertemplate=("look-back %{x} " + unit + "s "
                            "(%{customdata[0]}→%{customdata[1]}), n=%{customdata[2]}"
                            "<br>" + name + "=%{y:.3f}<extra></extra>")))
         fig.add_trace(go.Scatter(
-            x=[best["lookback"]], y=[best["val"]], mode="markers", name="best",
+            x=[best["lookback"]], y=[best["test"]], mode="markers", name="best",
             marker=dict(color=viz.GOOD, size=13, symbol="star"), hoverinfo="skip"))
         fig.update_xaxes(title=f"training window = most recent N {unit}s "
                                "(grows backward)", dtick=1)
-        fig.update_yaxes(title=f"validation {name}")
+        fig.update_yaxes(title=f"test {name}")
         fig = viz._base(fig, "Temporal learning curve — history length vs performance",
                         440)
 
         table = curve.rename(columns={"lookback": f"look-back ({unit}s)",
                                       "from_period": "from", "to_period": "to",
-                                      "n_samples": "n", "val": name})
-        verdict = (f"Validation {name} ranges {curve['val'].min():.3f}–"
-                   f"{curve['val'].max():.3f} across look-backs of 1–{last_tp + 1} "
+                                      "n_samples": "n", "test": name})
+        verdict = (f"Test {name} ranges {curve['test'].min():.3f}–"
+                   f"{curve['test'].max():.3f} across look-backs of 1–{P} "
                    f"{unit}s; highest at a {int(best['lookback'])}-{unit} window.")
         return LearningCurveReport("temporal", table, fig, verdict,
                                    details=dict(curve=curve, unit=unit,
                                                 periods=labels,
-                                                val_periods=val_periods,
                                                 best_lookback=int(best["lookback"])))
 
     @staticmethod

@@ -202,14 +202,16 @@ help; a flat validation curve means it won't.
 | `verdict` | one line: final train/val scores, the gap, and the validation span |
 | `details` | `curve` (DataFrame) |
 
-### `temporal_curve(model, ds, freq="M", val_periods=1, min_period_samples=30) -> LearningCurveReport`
+### `temporal_curve(model, ds, freq="M", min_period_samples=30) -> LearningCurveReport`
 
 **Sufficiency measured in calendar periods** — the fraud-detection case, where
-older data can be *detrimental*. Requires `time_col`. The data are bucketed into
-ordered periods; the most recent `val_periods` period(s) are held out as
-validation (the "present"); the training window then grows **backward one period
-at a time** — last 1 month, last 2 months, … — and the validation score is
-recorded at each look-back.
+older data can be *detrimental*. Requires `time_col` on the training data. The
+training window grows **backward one period at a time** — last 1 month, last 2
+months, … — and each look-back is scored on the **explicit test set**
+(`ds.X_test / ds.y_test`), exactly like `random_curve`. Because the evaluation
+target is fixed, every point is comparable; only the training window changes. This
+matches the out-of-time framing (train = history, test = the future period you
+want to predict), so build the Dataset with the test set as that target.
 
 Counting history in **whole months** (rather than sample counts) is both more
 interpretable ("train on the last 3 months") and robust to volume changes between
@@ -218,29 +220,27 @@ periods, which would otherwise distort row-count windows.
 | Parameter | Meaning |
 |---|---|
 | `freq` | calendar period size when `time_col` is datetime: `"M"` month (default), `"W"` week, `"Q"` quarter, `"Y"` year |
-| `val_periods` | number of most-recent periods held out as validation (default 1) |
-| `min_period_samples` | skip a look-back whose window has fewer rows than this |
+| `min_period_samples` | skip a look-back whose training window has fewer rows than this |
 
-**Time-column handling.** `time_col` may be either:
-- a **datetime** column → bucketed into calendar periods at `freq`; or
-- **ordered integer period ids** (e.g. month numbers `1..T`) → each distinct
-  value is one period, in ascending order — no dates required.
+**Time-column handling** (applies to the training data's `time_col`): may be
+either a **datetime** column → bucketed into calendar periods at `freq`; or
+**ordered integer period ids** (e.g. month numbers `1..T`) → each distinct value
+is one period, in ascending order — no dates required. Needs ≥ 2 training periods.
+A continuous numeric column (many distinct values) is rejected with a message
+asking for month ids or a datetime; bucket such timestamps first.
 
-Needs ≥ 3 periods. A continuous numeric column (many distinct values) is rejected
-with a message asking for month ids or a datetime; bucket such timestamps first.
-
-**Reading.** If validation peaks at a limited look-back and **declines** as older
-months are added, old data is stale → cap the training window near the peak (or
-add recency weighting / drift features). The one-line `verdict` reports the score
-range and where it peaks — no automatic labelling; you read the curve.
+**Reading.** If the test score peaks at a limited look-back and **declines** as
+older months are added, old data is stale → cap the training window near the peak
+(or add recency weighting / drift features). The one-line `verdict` reports the
+score range and where it peaks — no automatic labelling; you read the curve.
 
 **`LearningCurveReport` (mode `"temporal"`)**
 
 | Attribute | Contents |
 |---|---|
-| `table` | one row per look-back: `look-back (<unit>s)`, `from`, `to` (period range covered), `n`, `<score>` |
-| `fig` | single plotly figure: validation vs **length of history** (x-axis in periods), best point starred; hover shows the period range and sample count |
-| `details` | `curve` (DataFrame: `lookback, from_period, to_period, n_samples, val`), `unit`, `periods`, `val_periods`, `best_lookback` |
+| `table` | one row per look-back: `look-back (<unit>s)`, `from`, `to` (training-period range covered), `n` (training rows), `<score>` (on the test set) |
+| `fig` | single plotly figure: test score vs **length of history** (x-axis in periods), best point starred; hover shows the training-period range and sample count |
+| `details` | `curve` (DataFrame: `lookback, from_period, to_period, n_samples, test`), `unit`, `periods`, `best_lookback` |
 
 > Feature-level drift attribution (which variables shift) is available separately
 > via the refit-free `drift_drivers()` utility in `modeva_ext` (PSI / KS /
